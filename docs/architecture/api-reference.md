@@ -11,7 +11,7 @@ Authorization: Bearer <access_token>
 
 ## Authentication
 
-> Refresh token передається через httpOnly cookie. Всі запити до `/api/v1/auth/` потребують `credentials: 'include'` / `withCredentials: true`. Детально — [auth.md](auth.md).
+> Refresh token передається через httpOnly cookie. Всі запити до `/api/v1/auth/` потребують `credentials: 'include'` / `withCredentials: true`. Детально про auth flow — у [state-management.md](./state-management.md#auth-flow).
 
 ### `POST /api/v1/auth/token/`
 Отримати токени (логін).
@@ -394,7 +394,7 @@ Batch оновити кілька перекладів одночасно.
 | `lang` | string | Тільки одна мова |
 | `export_format` | `flat` \| `nested` | За замовчуванням `flat` |
 
-Детально — [public-api.md](public-api.md).
+Детально про формати та правила обробки помилок — у [api-contracts.md](./api-contracts.md).
 
 ---
 

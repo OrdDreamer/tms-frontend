@@ -19,12 +19,12 @@
 
 /app                        → дашборд (захищена зона)
 /app/projects               → список проєктів
-/app/projects/:projectId    → дашборд проєкту
+/app/projects/:projectSlug    → дашборд проєкту
 
-/app/projects/:projectId/translations   → робота з перекладами
-/app/projects/:projectId/settings       → налаштування проєкту
-/app/projects/:projectId/data/import    → імпорт перекладів
-/app/projects/:projectId/data/export    → експорт перекладів
+/app/projects/:projectSlug/translations   → робота з перекладами
+/app/projects/:projectSlug/settings       → налаштування проєкту
+/app/projects/:projectSlug/data/import    → імпорт перекладів
+/app/projects/:projectSlug/data/export    → експорт перекладів
 
 /app/profile                → профіль та налаштування користувача
 ```

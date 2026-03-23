@@ -210,6 +210,6 @@ flowchart TD
 
 - `docs/agents/agent-rules.md`
 - `docs/agents/prompts.md`
-- `docs/build-plan.md`
+- `docs/context/roadmap.md`
 - `docs/architecture/*`
 - `docs/standards/*`

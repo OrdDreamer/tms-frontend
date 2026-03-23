@@ -122,7 +122,7 @@ Prepare implementation-ready feature documentation.
 Inputs:
 - Feature idea: Build an agent-agnostic control system for AI development process in docs/agents.
 - Scope constraints: Do not change docs/architecture/* and docs/standards/*; only extend docs/agents/*.
-- Relevant existing docs: docs/build-plan.md, docs/architecture/overview.md, docs/standards/coding-guidelines.md
+- Relevant existing docs: docs/context/roadmap.md, docs/architecture/overview.md, docs/standards/coding-guidelines.md
 
 Instructions:
 1) Align strictly with architecture/* and standards/*.
@@ -326,7 +326,7 @@ Include:
 - Current task: Update docs/agents/prompts.md to include per-prompt role description and usage examples.
 - Current status: review
 - Files changed: docs/agents/prompts.md
-- Remaining work: run final consistency pass with docs/build-plan.md and close task in docs/tasks/done.md
+- Remaining work: run final consistency pass with docs/agents/agent-rules.md and close task in docs/tasks/done.md
 - Risks/blockers: possible wording mismatch between prompt placeholders and actual project docs
 - Decisions made: keep prompts agent-agnostic; keep placeholder explanations next to each prompt
 - Verification done: markdown lint check passed; manual read-through completed
