@@ -234,42 +234,12 @@ location / {
 
 **Глобальний `<ErrorBoundary>`** на рівні `app/` — ловить всі React-помилки рендеру.
 
-**API-помилки — глобальна обробка через `QueryCache` / `MutationCache`:**
+**API-помилки** обробляються на двох рівнях:
+- Глобально — через `QueryCache` / `MutationCache` callbacks у `shared/api/query-client.ts` (toast-нотифікації)
+- Індивідуально — `onError` у мутаціях для специфічної UI-логіки (виділення полів форми)
+- `401` — ізольовано в axios interceptor (refresh + retry), не торкається TanStack Query
 
-```ts
-// shared/api/query-client.ts
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error) => handleGlobalError(error),
-  }),
-  mutationCache: new MutationCache({
-    onError: (error) => handleGlobalError(error),
-  }),
-})
-```
-
-`handleGlobalError` — єдина точка показу toast-нотифікацій (`@mantine/notifications`):
-- `429` → toast з повідомленням про ліміт, retry з `Retry-After` header
-- `5xx` → toast "Server error"
-- інші → toast з повідомленням з тіла відповіді або fallback
-
-Індивідуальний `onError` у мутаціях — тільки для специфічної UI-логіки (наприклад, виділити поле форми). Загальні toast-и — не дублювати.
-
-**401 — ізольовано в axios interceptor:**
-
-Обробка 401 не торкається TanStack Query. Axios response interceptor:
-1. Перехоплює 401
-2. Викликає `POST /auth/token/refresh/`
-3. Якщо успішно — оновлює токен у Zustand, повторює оригінальний запит
-4. Якщо невдало — `clearAuth()` + redirect `/auth/login` + BroadcastChannel logout
-
-TanStack Query бачить лише успішний повторний запит або помилку після retry — логіки refresh у query/mutation callbacks немає.
-
-**BroadcastChannel logout** — надсилається при:
-1. Ручному logout (кнопка в UI)
-2. Невдалому refresh (401 на `/token/refresh/`)
-
-Кожна вкладка слухає канал і при отриманні повідомлення — `clearAuth()` + redirect на `/auth/login`.
+Конфігурація QueryClient, auth flow, BroadcastChannel logout — у [State Management](./state-management.md).
 
 ---
 

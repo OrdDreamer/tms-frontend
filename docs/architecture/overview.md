@@ -56,24 +56,17 @@ shared/     Утиліти без бізнес-знань: axios instance, UI-pr
 
 ## Ключові архітектурні рішення
 
-### Стан додатку — два рівні
+### Стан додатку
 
-| Тип стану | Інструмент | Відповідальність |
-|-----------|-----------|-----------------|
-| Server state | TanStack Query v5 | Дані з API: кешування, інвалідація, мутації |
-| Client state | Zustand | Auth токен + UI-преференції (мінімально) |
+Чотири рівні: server state (TanStack Query), client state (Zustand), form state (@mantine/form), URL state (TanStack Router search params). Серверні дані не дублюються у Zustand.
 
-Form state (@mantine/form) використовується локально всередині компонентів і не належить до глобальних рівнів стану.
-
-Дані з сервера **не дублюються** у Zustand — це відповідальність TanStack Query.
+Детальні політики, query configuration, auth flow — у [State Management](./state-management.md).
 
 ### Аутентифікація
 
-- Access token (JWT, TTL 60 хв) зберігається **в пам'яті** (Zustand) — не в localStorage і не в cookie. Кожна вкладка браузера має свій незалежний екземпляр токена
-- Refresh token (httpOnly cookie, TTL 7 днів) — недоступний через JS, передається автоматично, спільний для всіх вкладок
-- При 401 — axios response interceptor викликає refresh і повторює оригінальний запит
-- При невдалому refresh — `clearAuth()` + redirect на `/login`
-- **Logout по всіх вкладках** — при logout необхідно повідомити інші вкладки через `BroadcastChannel`. Кожна вкладка, отримавши повідомлення, викликає `clearAuth()` і робить redirect на `/login`
+Access token зберігається in-memory (Zustand), refresh token — у httpOnly cookie. При 401 — axios interceptor виконує refresh і retry. Cross-tab logout — через BroadcastChannel.
+
+Повна схема auth flow, promise queue, silent refresh — у [State Management](./state-management.md#auth-flow).
 
 ### Routing
 

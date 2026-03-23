@@ -1,6 +1,6 @@
 # API Contracts
 
-Цей документ описує **як фронтенд взаємодіє з API**: TypeScript-типи, конфігурацію axios, конвенції TanStack Query та обробку помилок.
+Цей документ описує **як фронтенд взаємодіє з API**: TypeScript-типи, конфігурацію axios та обробку помилок. Конвенції TanStack Query (key factories, staleTime, інвалідація) — у [State Management](./state-management.md).
 
 > **Для агентів:** нові запити до API реалізуються виключно через entities-шар FSD. Не викликати axios напряму з features або widgets.
 
@@ -109,108 +109,15 @@ api.interceptors.request.use((config) => {
 
 ### Response interceptor — 401 retry flow
 
-При 401 — одна спроба refresh, потім повтор оригінального запиту. Якщо refresh невдалий — `clearAuth()` + redirect на `/login`.
+При 401 — одна спроба refresh через promise queue, потім повтор оригінального запиту. Якщо refresh невдалий — `clearAuth()` + BroadcastChannel logout + redirect.
 
-```typescript
-api.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const original = error.config!;
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true;
-      try {
-        const { data } = await axios.post('/api/v1/auth/token/refresh/', null, {
-          baseURL: import.meta.env.VITE_API_BASE_URL,
-          withCredentials: true,
-        });
-        useAuthStore.getState().setAccessToken(data.access);
-        original.headers.Authorization = `Bearer ${data.access}`;
-        return api(original);
-      } catch {
-        useAuthStore.getState().clearAuth();
-        // redirect — через TanStack Router
-      }
-    }
-    return Promise.reject(error);
-  }
-);
-```
-
-> Тільки один refresh-запит на всі паралельні 401. Якщо потрібна черга — реалізувати через promise queue у `instance.ts`.
+Повна схема auth flow, promise queue та BroadcastChannel — у [State Management](./state-management.md#auth-flow).
 
 ---
 
 ## TanStack Query — конвенції
 
-### Query Key Factory
-
-Кожен entity-слайс має свій query key factory у `src/entities/<entity>/api/queryKeys.ts`.
-
-```typescript
-// src/entities/project/api/queryKeys.ts
-export const projectKeys = {
-  all: ['projects'] as const,
-  lists: () => [...projectKeys.all, 'list'] as const,
-  detail: (slug: string) => [...projectKeys.all, 'detail', slug] as const,
-  languages: (slug: string) => [...projectKeys.detail(slug), 'languages'] as const,
-};
-
-// src/entities/translation-key/api/queryKeys.ts
-export const translationKeyKeys = {
-  all: (projectSlug: string) => ['projects', projectSlug, 'keys'] as const,
-  lists: (projectSlug: string, params?: TranslationKeyParams) =>
-    [...translationKeyKeys.all(projectSlug), 'list', params] as const,
-  detail: (projectSlug: string, key: string) =>
-    [...translationKeyKeys.all(projectSlug), 'detail', key] as const,
-};
-```
-
-### Stale Time
-
-| Тип даних | `staleTime` |
-|-----------|-------------|
-| Список проєктів | `30s` |
-| Деталі проєкту + мови | `60s` |
-| Список ключів (з пагінацією) | `30s` |
-| Поточний користувач (`/me/`) | `5min` |
-| Список мов системи | `Infinity` (незмінний) |
-
-### Інвалідація після мутацій
-
-```typescript
-// Після створення/видалення проєкту
-queryClient.invalidateQueries({ queryKey: projectKeys.lists() });
-
-// Після зміни мов проєкту
-queryClient.invalidateQueries({ queryKey: projectKeys.detail(slug) });
-
-// Після оновлення перекладу
-queryClient.invalidateQueries({ queryKey: translationKeyKeys.lists(projectSlug) });
-```
-
-> Не робити `invalidateQueries({ queryKey: ['projects'] })` — це скидає весь кеш проєктів. Інвалідувати точково.
-
-### Оптимістичні оновлення
-
-Використовувати для inline-редагування перекладів (`PUT /keys/{key}/translations/{lang}/`):
-
-```typescript
-const mutation = useMutation({
-  mutationFn: updateTranslation,
-  onMutate: async ({ key, lang, value }) => {
-    await queryClient.cancelQueries({ queryKey: translationKeyKeys.lists(projectSlug) });
-    const previous = queryClient.getQueryData(translationKeyKeys.lists(projectSlug));
-    // optimistic update...
-    return { previous };
-  },
-  onError: (_err, _vars, context) => {
-    queryClient.setQueryData(translationKeyKeys.lists(projectSlug), context?.previous);
-  },
-  onSettled: () => {
-    queryClient.invalidateQueries({ queryKey: translationKeyKeys.lists(projectSlug) });
-  },
-});
-```
+Query key factories, staleTime стратегія, правила інвалідації кешу, оптимістичні оновлення — у [State Management](./state-management.md#tanstack-query-server-state).
 
 ---
 
