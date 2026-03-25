@@ -10,28 +10,28 @@ Canonical-документ для всього, що стосується ста
 
 Стан додатку розділений на чотири незалежних рівні. Кожен рівень має своє джерело правди та інструмент.
 
-| Рівень | Інструмент | Де живе | Scope |
-|--------|-----------|---------|-------|
-| Server state | TanStack Query v5 | `entities/<name>/api/`, `features/<name>/api/` | Дані з API: кешування, інвалідація, мутації |
-| Client state | Zustand | `shared/auth/` | Auth токен + мінімальний UI-стан |
-| Form state | @mantine/form | Локально у компоненті | Значення полів, валідація, dirty-tracking |
-| URL state | TanStack Router search params | URL query string | Фільтрація, пагінація, view mode |
+| Рівень       | Інструмент                                            | Де живе                                                                           | Scope                                                                |
+| ------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Server state | TanStack Query v5                                     | `pages/*/queries`, `features/*/queries` (і `shared/api` для чистих fetch-функцій) | Дані з API: кешування, інвалідація, мутації                          |
+| Client state | `useState` / `useReducer`, React Context (провайдери) | `app/providers`, `shared/auth` тощо                                               | Токен сесії, рідкісний глобальний UI-стан без дублювання server data |
+| Form state   | @mantine/form                                         | Локально у компоненті                                                             | Значення полів, валідація, dirty-tracking                            |
+| URL state    | TanStack Router search params                         | URL query string                                                                  | Фільтрація, пагінація, view mode                                     |
 
-**Ключовий принцип:** дані з сервера **не дублюються** у Zustand. TanStack Query — єдине джерело правди для server data. Zustand зберігає лише те, що не є server state і не може бути в URL.
+**Ключовий принцип:** дані з сервера **не дублюються** у глобальному клієнтському store. TanStack Query — єдине джерело правди для server data. Клієнтський шар тримає лише те, що не є server state і не може бути в URL. **Zustand як дефолтний вибір не рекомендується**; допустимий лише після окремого обґрунтування.
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                   Компонент                     │
 │                                                 │
-│  useQuery(...)        useAuthStore(...)          │
+│  useQuery(...)        useAuth() / Context       │
 │  useMutation(...)     form.values               │
 │                       route.search              │
 └────────┬──────────────────┬──────────┬──────────┘
          │                  │          │
-    TanStack Query      Zustand    TanStack Router
-    (server data)    (auth token)  (URL params)
+    TanStack Query    Client state   TanStack Router
+    (server data)     (провайдери)   (URL params)
          │
-     axios instance
+     shared/api (fetch / ofetch)
          │
      Backend API
 ```
@@ -44,7 +44,7 @@ Canonical-документ для всього, що стосується ста
 
 ```typescript
 // src/shared/api/query-client.ts
-import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query';
+import { QueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,66 +64,92 @@ export const queryClient = new QueryClient({
 });
 ```
 
-`handleGlobalError` — єдина точка показу toast-нотифікацій (`@mantine/notifications`):
-- `429` — toast з повідомленням про ліміт
-- `5xx` — toast "Server error"
-- інші — toast з повідомленням з тіла відповіді або fallback
+`handleGlobalError` — **за замовчуванням** єдина точка toast-ів (`@mantine/notifications`) для помилок, які **не перехоплені локально** і **не позначені як тихі**.
 
-Індивідуальний `onError` у мутаціях — тільки для специфічної UI-логіки (виділити поле форми). Загальні toast-и не дублювати.
+#### Глобально (типові коди і кейси)
 
-> `401` обробляється **не тут**, а в axios interceptor — TanStack Query бачить лише успішний повторний запит або помилку після retry. Деталі — у секції [Auth Flow](#auth-flow).
+Показувати загальний toast / єдиний стиль повідомлення, якщо немає спеціальної локальної обробки:
+
+| Код / ситуація                                           | Поведінка глобально                                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Мережа** (`failed to fetch`, timeout, offline)         | Один зрозумілий toast («немає мережі», «таймаут»)                                          |
+| **429**                                                  | Toast про перевищення ліміту / rate limit                                                  |
+| **502, 503, 504** (і загалом **5xx**)                    | Toast на кшталт «сервер недоступний» / server error                                        |
+| **403** (якщо немає окремого екрана «доступ заборонено») | Короткий toast або redirect за політикою продукту                                          |
+| **404** для «загальних» запитів (рідко)                  | Fallback toast; якщо це **очікувана** ситуація на конкретному екрані — див. локально нижче |
+| **Інші 4xx / невідомі**                                  | Toast з текстом з тіла відповіді API або узгоджений fallback                               |
+
+**`401`** у глобальний toast **зазвичай не виносимо**: спочатку refresh/retry у `shared/api`, потім при остаточній відмові — redirect на логін (можливо без «шумного» toast). Деталі — у секції [Auth Flow](#auth-flow).
+
+#### Локально (пріоритет над глобальним)
+
+Якщо для запиту/мутації потрібна **своя** логіка — обробляй у `onError` на `useQuery` / `useMutation` (або в обгортці):
+
+- **400** з **валідаційними полями** (`extra.fields` / подібне) — мапінг на `form.setFieldError`, **без** дублюючого глобального toast (познач контекст як оброблений або `meta: { suppressGlobalError: true }`, якщо впровадите такий прапорець).
+- **409, 422** — конфлікт / бізнес-правило: часто потрібен **специфічний** текст або UI (модалка), не загальний toast.
+- **404** на екрані, де «не знайдено» — **очікуваний** стан (показ порожнього стану / 404-сторінки), а не глобальний toast.
+- **Тихі** фонові запити (prefetch тощо) — без toast; передати **`meta.suppressGlobalError: true`** (або еквівалент), щоб `handleGlobalError` їх пропустив.
+
+#### Правило без дублювання
+
+Якщо помилку вже оброблено локально — глобальний шар **не повинен** показувати другий toast. Домовленість проєкту: або прапорець у `meta`, або узгоджений тип помилки `HandledApiError`, який `handleGlobalError` ігнорує.
 
 ### Query Key Factory
 
-Кожен entity має свій key factory у `src/entities/<entity>/model/query-keys.ts`. Патерн — обʼєкт з методами, що повертають `readonly` tuple.
+Усі key factory для TanStack Query живуть у **`shared/query-keys/`** — по одному файлу на домен даних (наприклад `project-keys.ts`, `user-keys.ts`). `pages/*` та `features/*` **тільки імпортують** фабрики з `shared`, а не тримають власні копії ключів.
+
+**Навіщо так:** одна форма `queryKey` для читання та для `invalidateQueries` / optimistic update; **немає крос-імпортів** між фічами й сторінками заради доступу до ключів.
+
+Патерн — обʼєкт з методами, що повертають `readonly` tuple:
 
 ```typescript
-// src/entities/project/model/query-keys.ts
+// shared/query-keys/project-keys.ts
 export const projectKeys = {
-  all: ['projects'] as const,
-  lists: () => [...projectKeys.all, 'list'] as const,
-  detail: (slug: string) => [...projectKeys.all, 'detail', slug] as const,
-  languages: (slug: string) => [...projectKeys.detail(slug), 'languages'] as const,
+  all: ["projects"] as const,
+  lists: () => [...projectKeys.all, "list"] as const,
+  detail: (slug: string) => [...projectKeys.all, "detail", slug] as const,
+  languages: (slug: string) =>
+    [...projectKeys.detail(slug), "languages"] as const,
 };
 ```
 
 ```typescript
-// src/entities/translation-key/model/query-keys.ts
+// shared/query-keys/translation-key-keys.ts
 export const translationKeyKeys = {
-  all: (projectSlug: string) => ['projects', projectSlug, 'keys'] as const,
+  all: (projectSlug: string) => ["projects", projectSlug, "keys"] as const,
   lists: (projectSlug: string, params?: TranslationKeyParams) =>
-    [...translationKeyKeys.all(projectSlug), 'list', params] as const,
+    [...translationKeyKeys.all(projectSlug), "list", params] as const,
   detail: (projectSlug: string, key: string) =>
-    [...translationKeyKeys.all(projectSlug), 'detail', key] as const,
+    [...translationKeyKeys.all(projectSlug), "detail", key] as const,
 };
 ```
 
 ```typescript
-// src/entities/user/model/query-keys.ts
+// shared/query-keys/user-keys.ts
 export const userKeys = {
-  all: ['users'] as const,
-  lists: () => [...userKeys.all, 'list'] as const,
-  me: () => [...userKeys.all, 'me'] as const,
-  detail: (id: number) => [...userKeys.all, 'detail', id] as const,
+  all: ["users"] as const,
+  lists: () => [...userKeys.all, "list"] as const,
+  me: () => [...userKeys.all, "me"] as const,
+  detail: (id: number) => [...userKeys.all, "detail", id] as const,
 };
 ```
 
 ```typescript
-// src/entities/language/model/query-keys.ts
+// shared/query-keys/language-keys.ts
 export const languageKeys = {
-  all: ['languages'] as const,
+  all: ["languages"] as const,
 };
 ```
 
 ### staleTime стратегія
 
-| Тип даних | `staleTime` | Обґрунтування |
-|-----------|-------------|---------------|
-| Список проєктів | `30s` | Змінюється рідко, але має бути актуальним |
-| Деталі проєкту + мови | `60s` | Менш волатильні |
-| Список ключів (з пагінацією) | `30s` | Часто змінюється іншими користувачами |
-| Поточний користувач (`/me/`) | `5min` | Рідко змінюється, оновлюється після edit profile |
-| Список мов системи (`/languages/`) | `Infinity` | Довідник — не змінюється під час сесії |
+| Тип даних                          | `staleTime` | Обґрунтування                                    |
+| ---------------------------------- | ----------- | ------------------------------------------------ |
+| Список проєктів                    | `30s`       | Змінюється рідко, але має бути актуальним        |
+| Деталі проєкту + мови              | `60s`       | Менш волатильні                                  |
+| Список ключів (з пагінацією)       | `30s`       | Часто змінюється іншими користувачами            |
+| Поточний користувач (`/me/`)       | `5min`      | Рідко змінюється, оновлюється після edit profile |
+| Список мов системи (`/languages/`) | `Infinity`  | Довідник — не змінюється під час сесії           |
 
 `staleTime` задається на рівні окремих хуків `useQuery`, а не глобально (окрім default `30s` у QueryClient).
 
@@ -131,16 +157,16 @@ export const languageKeys = {
 
 Інвалідація має бути **точковою** — через query key factory. Широка інвалідація (`queryKey: ['projects']`) скидає весь кеш піддерева і забороняється.
 
-| Мутація | Інвалідація |
-|---------|-------------|
-| Створення/видалення проєкту | `projectKeys.lists()` |
-| Оновлення проєкту | `projectKeys.detail(slug)` |
-| Зміна мов проєкту | `projectKeys.detail(slug)` |
-| Створення/видалення ключа | `translationKeyKeys.lists(projectSlug)` |
-| Оновлення перекладу | `translationKeyKeys.lists(projectSlug)` |
-| Bulk delete ключів | `translationKeyKeys.lists(projectSlug)` |
-| Оновлення профілю | `userKeys.me()` |
-| Зміна пароля | `userKeys.me()` + оновлення auth store |
+| Мутація                     | Інвалідація                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| Створення/видалення проєкту | `projectKeys.lists()`                                                                   |
+| Оновлення проєкту           | `projectKeys.detail(slug)`                                                              |
+| Зміна мов проєкту           | `projectKeys.detail(slug)`                                                              |
+| Створення/видалення ключа   | `translationKeyKeys.lists(projectSlug)`                                                 |
+| Оновлення перекладу         | `translationKeyKeys.lists(projectSlug)`                                                 |
+| Bulk delete ключів          | `translationKeyKeys.lists(projectSlug)`                                                 |
+| Оновлення профілю           | `userKeys.me()`                                                                         |
+| Зміна пароля                | `userKeys.me()` + оновлення access token (сесія через провайдер / `setAccessTokenSync`) |
 
 ```typescript
 // Приклад: після створення проєкту
@@ -160,16 +186,25 @@ useMutation({
 const mutation = useMutation({
   mutationFn: updateTranslation,
   onMutate: async ({ key, lang, value }) => {
-    await queryClient.cancelQueries({ queryKey: translationKeyKeys.lists(projectSlug) });
-    const previous = queryClient.getQueryData(translationKeyKeys.lists(projectSlug));
+    await queryClient.cancelQueries({
+      queryKey: translationKeyKeys.lists(projectSlug),
+    });
+    const previous = queryClient.getQueryData(
+      translationKeyKeys.lists(projectSlug),
+    );
     // optimistic update у кеші...
     return { previous };
   },
   onError: (_err, _vars, context) => {
-    queryClient.setQueryData(translationKeyKeys.lists(projectSlug), context?.previous);
+    queryClient.setQueryData(
+      translationKeyKeys.lists(projectSlug),
+      context?.previous,
+    );
   },
   onSettled: () => {
-    queryClient.invalidateQueries({ queryKey: translationKeyKeys.lists(projectSlug) });
+    queryClient.invalidateQueries({
+      queryKey: translationKeyKeys.lists(projectSlug),
+    });
   },
 });
 ```
@@ -184,8 +219,14 @@ const offset = (page - 1) * limit;
 
 ```typescript
 const { data, isPlaceholderData } = useQuery({
-  queryKey: translationKeyKeys.lists(projectSlug, { search, lang, page, limit }),
-  queryFn: () => fetchTranslationKeys(projectSlug, { search, lang, offset, limit }),
+  queryKey: translationKeyKeys.lists(projectSlug, {
+    search,
+    lang,
+    page,
+    limit,
+  }),
+  queryFn: () =>
+    fetchTranslationKeys(projectSlug, { search, lang, offset, limit }),
   placeholderData: keepPreviousData,
 });
 ```
@@ -194,88 +235,70 @@ const { data, isPlaceholderData } = useQuery({
 
 ### Hooks conventions
 
-| Тип | Розташування | Приклад |
-|-----|-------------|---------|
-| `useQuery` для entity | `entities/<name>/api/` | `use-projects.ts`, `use-project.ts` |
-| `useMutation` для feature | `features/<name>/api/` | `use-create-project.ts` |
-| Query key factory | `entities/<name>/model/` | `query-keys.ts` |
-| API functions (axios calls) | `entities/<name>/api/` | `project-api.ts` |
+| Тип                                              | Розташування                                      | Приклад                                           |
+| ------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------- |
+| `useQuery` / `useMutation`, прив’язані до екрану | `pages/<area>/<page>/queries/`                    | `use-project-list.ts`                             |
+| Спільні між сторінками query/mutation-хуки       | `features/<name>/queries/` (або поруч із feature) | `use-create-project.ts`                           |
+| Query key factory                                | `shared/query-keys/` (один файл на домен)         | `project-keys.ts`, `user-keys.ts`                 |
+| Чисті функції HTTP (без React)                   | `shared/api/`                                     | `project-api.ts`, обгортка над `fetch` / `ofetch` |
 
-Query хуки (`useQuery`) описують **зчитування даних** і належать entity-шару. Mutation хуки (`useMutation`) описують **дії користувача** і належать feature-шару.
+Читання та зміна даних на бекенді йдуть через TanStack Query: **`queryFn` / `mutationFn`** викликають функції з `shared/api`, а не роблять мережевий виклик прямо в компоненті.
 
 ---
 
-## Zustand (Client State)
+## Клієнтський стан (Client state)
 
-### Auth Store
+### Підхід
 
-Єдиний Zustand store у додатку. Зберігає мінімум того, що не є server state.
+- **Локально** — `useState` / `useReducer` у компоненті або в невеликому піддереві.
+- **Спільно для багатьох гілок UI** — один або кілька **вузьких** React Context (провайдери): мемоізований `value`, розділення контекстів, щоб уникати зайвих ре-рендерів.
+- **Zustand** — не рекомендується як стандарт; якщо колись з’явиться в проєкті, це має бути явне архітектурне рішення з обґрунтуванням.
+
+### Auth: токен і доступ з HTTP-шару
+
+Токен сесії тримається **in-memory** у провайдері (або в невеликому модулі, синхронізованому з ним). Дані користувача (`User`) — це **server state** (`useQuery`, наприклад `userKeys.me()`), а не поле глобального клієнтського store.
+
+Для `401` / refresh HTTP-обгортці потрібен **синхронний** доступ до поточного access token поза React. Типовий патерн: невеликий модуль-мір (`getAccessToken` / `setAccessToken`), який оновлюється з `AuthProvider` при логіні / logout / refresh:
 
 ```typescript
-// src/shared/auth/auth-store.ts
-import { create } from 'zustand';
+// shared/api/auth-session.ts — приклад контракту (реалізація в проєкті)
+let accessToken: string | null = null;
 
-interface AuthState {
-  accessToken: string | null;
-  setAccessToken: (token: string) => void;
-  clearAuth: () => void;
-}
+export const setAccessTokenSync = (token: string | null) => {
+  accessToken = token;
+};
 
-export const useAuthStore = create<AuthState>((set) => ({
-  accessToken: null,
-  setAccessToken: (token) => set({ accessToken: token }),
-  clearAuth: () => set({ accessToken: null }),
-}));
+export const getAccessTokenSync = () => accessToken;
 ```
 
-Дані користувача (`User`) **не зберігаються** у Zustand — це server state, доступний через `useQuery` з ключем `userKeys.me()`.
+Провайдер при зміні токена викликає `setAccessTokenSync`, щоб `shared/api` міг додавати `Authorization` і керувати чергою refresh без підписки на React.
 
 ### Принцип мінімалізму
 
-Zustand зберігає лише:
-- `accessToken` — JWT токен поточної сесії
-- Можливі UI-преференції, якщо вони не можуть бути в URL (наприклад, стан sidebar)
+Глобальний клієнтський шар зберігає лише необхідний мінімум, наприклад:
 
-Все інше має бути:
+- access token (сесія)
+- винятково ті UI-прапорці, які не в URL і не є server state (рідко)
+
+Усе інше:
+
 - **Server state** → TanStack Query
-- **Filter/pagination state** → URL search params
-- **Form state** → @mantine/form
-- **Тема (dark/light)** → Mantine ColorScheme (localStorage через MantineProvider)
-
-### Підписка через selectors
-
-Для уникнення зайвих ре-рендерів — завжди використовувати селектор:
-
-```typescript
-// ✅ підписка лише на accessToken
-const token = useAuthStore((state) => state.accessToken);
-
-// ❌ підписка на весь store — ре-рендер при будь-якій зміні
-const store = useAuthStore();
-```
-
-### Доступ поза React
-
-Axios interceptor потребує токен поза React-деревом. Для цього використовується `getState()`:
-
-```typescript
-const token = useAuthStore.getState().accessToken;
-```
-
-Це синхронний виклик без підписки — підходить для interceptor-ів та утиліт.
+- **Фільтри / пагінація** → URL search params
+- **Форми** → @mantine/form
+- **Тема (dark/light)** → Mantine ColorScheme (через `MantineProvider`)
 
 ---
 
 ## Form State (@mantine/form)
 
-Form state — завжди локальний для компонента. Не використовувати Zustand або контекст для форм.
+Form state — завжди локальний для компонента. Не виносити стан форми у глобальний контекст чи окремий store (крім локального контексту самої форми, якщо це навмисний UX).
 
 ### Серверні помилки у формі
 
 Після невдалої мутації — маппити `ApiError.extra.fields` на помилки полів форми:
 
 ```typescript
-import { getFieldErrors } from '@/shared/api';
+import { getFieldErrors } from "@/shared/api";
 
 const mutation = useMutation({
   mutationFn: createProject,
@@ -291,6 +314,7 @@ const mutation = useMutation({
 ### Валідація
 
 Фронтенд-валідація дублює обмеження бекенду:
+
 - slug: `^[a-z0-9]+(?:-[a-z0-9]+)*$`, max 100
 - key: `^[a-z0-9]+(?:[._][a-z0-9]+)*$`, мінімум 2 сегменти
 - password: мінімум 8 символів
@@ -305,15 +329,15 @@ const mutation = useMutation({
 
 ### Search params для `/translations`
 
-| Параметр | Тип | Default | Опис                                       |
-|----------|-----|---------|--------------------------------------------|
-| `search` | `string` | `''`    | Пошук за назвою ключа                      |
-| `lang` | `string` | `''`    | Фільтр за мовою                            |
+| Параметр | Тип                              | Default   | Опис                                       |
+| -------- | -------------------------------- | --------- | ------------------------------------------ |
+| `search` | `string`                         | `''`      | Пошук за назвою ключа                      |
+| `lang`   | `string`                         | `''`      | Фільтр за мовою                            |
 | `status` | `'translated' \| 'untranslated'` | `''`      | Статус перекладу (лише у зв'язці із мовою) |
-| `sort` | `string` | `''`    | Сортування                                 |
-| `page` | `number` | `1`     | Номер сторінки (1-based)                   |
-| `limit` | `number` | `20`    | Елементів на сторінці                      |
-| `view` | `'table' \| 'list'` | `'table'` | Режим відображення                         |
+| `sort`   | `string`                         | `''`      | Сортування                                 |
+| `page`   | `number`                         | `1`       | Номер сторінки (1-based)                   |
+| `limit`  | `number`                         | `20`      | Елементів на сторінці                      |
+| `view`   | `'table' \| 'list'`              | `'table'` | Режим відображення                         |
 
 ### Синхронізація з TanStack Query
 
@@ -324,13 +348,21 @@ function TranslationsPage() {
   const { search, lang, status, page, limit } = Route.useSearch();
 
   const { data } = useQuery({
-    queryKey: translationKeyKeys.lists(projectSlug, { search, lang, status, page, limit }),
-    queryFn: () => fetchTranslationKeys(projectSlug, {
-      search, lang,
-      untranslated: status === 'untranslated',
-      offset: (page - 1) * limit,
+    queryKey: translationKeyKeys.lists(projectSlug, {
+      search,
+      lang,
+      status,
+      page,
       limit,
     }),
+    queryFn: () =>
+      fetchTranslationKeys(projectSlug, {
+        search,
+        lang,
+        untranslated: status === "untranslated",
+        offset: (page - 1) * limit,
+        limit,
+      }),
     placeholderData: keepPreviousData,
   });
 }
@@ -342,12 +374,21 @@ function TranslationsPage() {
 
 ### Зберігання токенів
 
-| Токен | Де зберігається | TTL | Доступ з JS | Scope |
-|-------|----------------|-----|-------------|-------|
-| Access token (JWT) | Zustand (in-memory) | 60 хв | Так | Одна вкладка |
-| Refresh token | httpOnly cookie | 7 днів | Ні | Всі вкладки (одне джерело) |
+| Токен              | Де зберігається                                   | TTL    | Доступ з JS | Scope                      |
+| ------------------ | ------------------------------------------------- | ------ | ----------- | -------------------------- |
+| Access token (JWT) | In-memory (React Provider + синх-модуль для HTTP) | 60 хв  | Так         | Одна вкладка               |
+| Refresh token      | httpOnly cookie                                   | 7 днів | Ні          | Всі вкладки (одне джерело) |
 
 Access token **не зберігається** у localStorage і не в cookie — лише в памʼяті. Кожна вкладка має свій незалежний екземпляр.
+
+### Прагматичний баланс: простота vs безпека
+
+Ця схема навмисно **проста** і **достатньо безпечна** для типового SPA + REST:
+
+- **Refresh у httpOnly** — JS не може прочитати довгоживучий секрет → суттєво краще, ніж `localStorage` / `sessionStorage`.
+- **Access in-memory** — після hard reload потрібен один **silent refresh** (невелика ціна), зате немає «залиплого» access у сховищі і вужче вікно ризику при XSS порівняно з токеном у LS.
+- **Альтернатива «обидва токени в cookies»** зручніша після F5 (рідше видно затримку), але вимагає ретельнішої **CSRF / SameSite / CORS** дисципліни на бекенді.
+- **localStorage для токенів** не рекомендується як усталений вибір: при XSS зловмисник може **ексфільтрувати** довгу сесію. Допустиме лише як свідомий компроміс (наприклад, закриті внутрішні інструменти) з короткими TTL і оцінкою ризиків.
 
 ### Повна схема
 
@@ -406,10 +447,10 @@ let refreshPromise: Promise<string> | null = null;
 async function refreshAccessToken(): Promise<string> {
   if (refreshPromise) return refreshPromise;
 
-  refreshPromise = axios
-    .post('/api/v1/auth/token/refresh/', null, { withCredentials: true })
-    .then(({ data }) => {
-      useAuthStore.getState().setAccessToken(data.access);
+  // apiPostRefresh() — реалізація в shared/api (POST /auth/token/refresh/, credentials: 'include')
+  refreshPromise = apiPostRefresh()
+    .then((data) => {
+      setAccessTokenSync(data.access);
       return data.access;
     })
     .finally(() => {
@@ -425,15 +466,15 @@ async function refreshAccessToken(): Promise<string> {
 При logout або невдалому refresh — повідомлення надсилається всім вкладкам:
 
 ```typescript
-const authChannel = new BroadcastChannel('tms-auth');
+const authChannel = new BroadcastChannel("tms-auth");
 
 // Надсилання (при logout або failed refresh)
-authChannel.postMessage({ type: 'logout' });
+authChannel.postMessage({ type: "logout" });
 
 // Прослуховування (при mount додатку)
-authChannel.addEventListener('message', (event) => {
-  if (event.data.type === 'logout') {
-    useAuthStore.getState().clearAuth();
+authChannel.addEventListener("message", (event) => {
+  if (event.data.type === "logout") {
+    setAccessTokenSync(null);
     // redirect → /auth/login
   }
 });
@@ -443,7 +484,7 @@ authChannel.addEventListener('message', (event) => {
 
 При першому завантаженні додатку (або refresh сторінки) — access token відсутній. Auth guard у TanStack Router `beforeLoad` ініціює silent refresh:
 
-1. `beforeLoad` перевіряє `useAuthStore.getState().accessToken`
+1. `beforeLoad` перевіряє наявність access token (наприклад `getAccessTokenSync()` або стан провайдера)
 2. Якщо `null` — викликає `POST /auth/token/refresh/`
 3. Якщо cookie валідний — отримує новий access token, продовжує
 4. Якщо cookie невалідний — redirect на `/auth/login`
@@ -452,12 +493,12 @@ authChannel.addEventListener('message', (event) => {
 
 ## Антипатерни
 
-| Антипатерн | Чому заборонено | Правильно |
-|-----------|-----------------|-----------|
-| Дублювати server data у Zustand | Два джерела правди, розсинхронізація | Використовувати TanStack Query |
-| React Context для глобального стану | Ре-рендер всього піддерева при зміні | Zustand (selector-based підписка) |
-| Access token у localStorage | XSS-вразливість, доступний всім скриптам | In-memory (Zustand) |
-| `invalidateQueries({ queryKey: ['projects'] })` | Скидає весь кеш піддерева | `invalidateQueries({ queryKey: projectKeys.lists() })` |
-| Логіка refresh у TanStack Query callbacks | Змішує transport-рівень з data-рівнем | Ізольовано в axios interceptor |
-| Зберігати filter state у Zustand | Втрачається при refresh, не можна поділитись URL | URL search params через TanStack Router |
-| `useAuthStore()` без селектора | Зайві ре-рендери при зміні будь-якого поля | `useAuthStore((s) => s.accessToken)` |
+| Антипатерн                                       | Чому заборонено                                   | Правильно                                                         |
+| ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------- |
+| Дублювати server data у глобальному client store | Два джерела правди, розсинхронізація              | TanStack Query                                                    |
+| Один великий Context на весь додаток             | Зайві ре-рендери, складно підтримувати            | Вузькі провайдери, мемоізований `value`, стан ближче до споживача |
+| Access token у localStorage                      | XSS-вразливість, доступний всім скриптам          | In-memory + httpOnly refresh cookie                               |
+| `invalidateQueries({ queryKey: ['projects'] })`  | Скидає весь кеш піддерева                         | `invalidateQueries({ queryKey: projectKeys.lists() })`            |
+| Логіка refresh у TanStack Query callbacks        | Змішує transport-рівень з data-рівнем             | Ізольовано в `shared/api`                                         |
+| Зберігати filter state у глобальному store       | Втрачається при refresh, не шариться URL          | URL search params через TanStack Router                           |
+| Рекламація Zustand «на все»                      | Зайва залежність при наявності Query + URL + форм | Спочатку Query, URL, локальний стан і провайдери                  |

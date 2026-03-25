@@ -57,6 +57,8 @@ if (!data?.length) return <EmptyState />;
 return <Content data={data} />;
 ```
 
+`isError` / `ErrorState` — це **збій завантаження даних** (мережа, API). **Неконтрольовані помилки рендеру** (throw у компоненті) має перехоплювати глобальний **Error Boundary** у `app/` — див. [Frontend Architecture → Error Handling](../architecture/frontend-architecture.md#error-handling).
+
 ### Rule: `empty` state містить наступну дію (CTA), якщо сценарій дозволяє
 **Why:** користувач не застрягає в тупиковому екрані.
 

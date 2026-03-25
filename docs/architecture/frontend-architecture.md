@@ -2,7 +2,7 @@
 
 Детальний опис структури проєкту, патернів та конфігурацій. Читати перед будь-якою роботою з кодом.
 
-> **Для агентів:** не створювати файли поза FSD-структурою. Не змінювати структуру шарів без явного дозволу. Всі архітектурні рішення зафіксовані тут.
+> **Для агентів:** дотримуватись **Page-First** шарів (`app` → `pages` → `features` → `shared`). Не змінювати структуру шарів без явного дозволу. Узгодженість з [Architecture Overview](./overview.md).
 
 ---
 
@@ -37,83 +37,89 @@
 
 ---
 
-## FSD: Шари
+## Page-First: шари
 
-Шість шарів від найвищого до найнижчого рівня відповідальності. Залежності — тільки зверху вниз.
+Чотири шари від найвищого рівня абстракції до найнижчого. Залежності — **тільки зверху вниз** ([детальні правила](./overview.md#шари-page-first)).
 
 ```
 src/
-├── app/        # Все що запускає додаток: providers, routing, global styles, entry point
-├── pages/      # Повні сторінки або великі частини сторінок (nested routing)
-├── widgets/    # Великі самодостатні блоки UI, що компонують features та entities
-├── features/   # Перевикористовувані реалізації дій користувача з бізнес-логікою
-├── entities/   # Бізнес-сутності, з якими працює проєкт (project, translation-key, user)
-└── shared/     # Перевикористовуваний функціонал, відʼєднаний від бізнес-специфіки
+├── app/        # Точка входу, провайдери, маршрути, layouts, глобальні стилі
+├── pages/      # Сторінки: кожна — мікромодуль (queries, components, …)
+├── features/   # Перевикористання між сторінками, трохи бізнес-логіки
+└── shared/     # Інфраструктура: api, query-keys, ui-примітиви, i18n, util
 ```
 
-`app/` і `shared/` — **не мають slice-ів**, містять сегменти напряму. Решта шарів (pages, widgets, features, entities) — складаються зі slice-ів.
+`widgets/` та `entities/` **не виділяються** окремими шарами: великі блоки збираються на сторінці або у `features/`, доменні типи та HTTP можуть жити в `shared/api` і поруч із use case у `pages/` / `features/`.
 
 > Актуальний список файлів — у файловій системі. Цей документ фіксує **патерни**, а не інвентар.
 
 ---
 
-## Slice-и та сегменти
+## Модулі сторінок та features
 
-Slice — група коду, обʼєднана за бізнес-доменом. Кожен slice має:
-- **Публічний API** — `index.ts`, єдина точка імпорту ззовні
-- **Нуль звʼязків** з іншими slice-ами того ж шару (zero coupling)
-- **Високу згуртованість** — весь код, повʼязаний з цією метою, живе разом
+### Сторінка (`pages/<area>/<page>/`)
 
-Споріднені slice-и можна групувати в папку (наприклад `features/auth/login/`, `features/auth/logout/`), але код між ними спільним бути не може.
+Кожен маршрут (або логічний екран) — **окремий мікромодуль**. Сусідні сторінки **не імпортують** одна одну.
 
-### Стандартні сегменти (FSD)
+Типова структура (сегменти додавати за потреби):
 
 ```
-<slice-name>/
-├── ui/        # UI-компоненти, форматери, стилі
-├── api/       # Взаємодія з бекендом: запити, TanStack Query хуки, маппери
-├── model/     # Модель даних: типи, схеми, стори, бізнес-логіка
-├── lib/       # Допоміжний код, що обслуговує інші модулі slice
-├── config/    # Конфігурація, feature flags
-└── index.ts   # Публічний API slice
+pages/app/projects/
+├── projects-page.tsx       # точка входу сторінки (композиція)
+├── components/
+├── hooks/
+├── queries/                # useQuery / useMutation, оркестрація лише для цього екрана
+├── mappers/
+├── types/
+└── ui/                     # презентаційні шматки саме цього екрана
 ```
 
-> Назви сегментів описують **призначення**, а не сутність. Тому `api/` замість `hooks/`, `model/` замість `types/`.
+### Feature (`features/<name>/`)
 
-Не кожен сегмент потрібен у кожному шарі. Додавай лише коли реально потрібен — порожні папки не створювати:
+Перевикористовуваний блок між сторінками. **Не імпортує** інші `features/*` — якщо потрібна звʼязка, композиція на рівні `pages/*` (props / callbacks), див. [Overview](./overview.md#як-працювати-коли-одна-feature-сильно-залежить-від-іншої).
 
-| Сегмент | pages | widgets | features | entities |
-|---------|:-----:|:-------:|:--------:|:--------:|
-| `ui/`   | ✅ | ✅ | ✅ | ✅ |
-| `api/`  | — | — | ✅ | ✅ |
-| `model/`| — | — | ✅ | ✅ |
-| `lib/`  | — | — | за потреби | за потреби |
-| `config/`| — | — | за потреби | — |
+Типово:
+
+```
+features/create-project/
+├── create-project-modal.tsx
+├── use-create-project.ts   # useMutation + invalidate через ключі з shared/query-keys
+├── types.ts                # за потреби
+└── index.ts                # публічний API feature (бажано)
+```
+
+### Сегменти: зведена таблиця
+
+| Сегмент      | pages | features |
+|-------------|:-----:|:--------:|
+| `components/`, `ui/` | ✅ | ✅ |
+| `hooks/` | ✅ | ✅ |
+| `queries/` або `*-queries.ts` | ✅ | ✅ |
+| `mappers/`, `types/` | ✅ | за потреби |
+| `index.ts` (public API) | за потреби | ✅ бажано |
 
 ---
 
-## Приклади slice-ів
+## Приклади
 
-**Entity (entities/project/):**
+**Сторінка списку проєктів (`pages/app/projects/`):**
+
 ```
-project/
-├── api/
-│   ├── project-api.ts       # fetchProjects(), createProject(), ...
-│   ├── use-projects.ts      # useQuery — список проєктів
-│   └── use-project.ts       # useQuery — один проєкт
-├── model/
-│   ├── types.ts             # type Project, ProjectCreate, ...
-│   └── query-keys.ts        # projectKeys.all, projectKeys.detail(id)
-└── index.ts
+projects/
+├── projects-page.tsx
+├── queries/
+│   └── use-projects.ts       # useQuery; queryKey з shared/query-keys/project-keys
+└── types.ts                  # за потреби
 ```
 
-TanStack Query хуки (`useQuery`, `useMutation`) — це **взаємодія з бекендом**, тому живуть в `api/`, а не в окремому сегменті.
+Чисті виклики API — у `shared/api/` (`fetchProjects()` тощо). **Key factory** — лише в [`shared/query-keys/`](./state-management.md#query-key-factory).
 
-**Feature (features/create-project/):**
+**Feature створення проєкту (`features/create-project/`):**
+
 ```
 create-project/
-├── ui/create-project-modal.tsx   # Mantine Modal з формою
-├── api/use-create-project.ts     # useMutation + інвалідація кешу
+├── create-project-modal.tsx
+├── use-create-project.ts     # useMutation; invalidateQueries(projectKeys.lists())
 └── index.ts
 ```
 
@@ -121,13 +127,15 @@ create-project/
 
 ## Шар app/
 
-`app/` містить сегменти напряму (без slice-ів):
+`app/` — без «слайсів», лише інфраструктура запуску:
 
 ```
 app/
-├── providers/     # MantineProvider, QueryClientProvider, RouterProvider, I18nProvider
-├── styles/        # global.css
-└── index.tsx      # Root компонент — монтує всі провайдери
+├── providers/          # MantineProvider, QueryClientProvider, RouterProvider, AuthProvider, …
+├── routes/ або routing/ # TanStack Router: оголошення маршрутів, `beforeLoad`, звʼязок path → page
+├── layouts/            # Public / authenticated shell, `_authenticated` layout
+├── styles/             # global.css
+└── index.tsx           # root: провайдери + роутер
 ```
 
 ---
@@ -138,46 +146,49 @@ app/
 
 ```
 shared/
-├── api/        # http-client.ts (axios instance з interceptors), query-client.ts
-├── auth/       # auth-store.ts — Zustand store (accessToken, user, clearAuth)
-├── config/     # env.ts — типізовані змінні середовища
-├── i18n/       # config.ts + locales/en/, locales/uk/
-├── ui/         # UI-примітиви без бізнес-логіки (error-boundary, page-loader)
-├── lib/        # Утиліти загального призначення (дати, валідація, форматування)
-└── test/msw/   # MSW handlers — спільні для тестів і dev-режиму
+├── api/         # обгортка fetch/ofetch, refresh/retry, query-client.ts, доменні *-api.ts
+├── query-keys/  # усі TanStack Query key factory (*.ts)
+├── auth/        # AuthProvider, синхронний доступ до токена для HTTP (див. state-management)
+├── config/      # env.ts — типізовані змінні середовища
+├── i18n/        # config.ts + locales/en/, locales/uk/
+├── ui/          # UI-примітиви без бізнес-логіки (error-boundary, page-loader)
+├── lib/         # утиліти загального призначення
+└── test/msw/    # MSW handlers — unit / integration / dev
 ```
 
-> `auth/` — кастомний сегмент. `shared/api/http-client.ts` імпортує з `shared/auth/` для interceptor-а — це дозволено, бо в `shared/` сегменти можуть вільно імпортувати один з одного.
+> У межах `shared/` сегменти можуть імпортувати один одного (наприклад `shared/api` + `shared/auth` для заголовка `Authorization` та refresh). **`shared/` не залежить від `pages/`, `features/`, `app/`.**
 
 ---
 
-## Правила імпортів (FSD)
+## Правила імпортів (Page-First)
 
-Дозволений напрямок: `pages` → `widgets` → `features` → `entities` → `shared`
+Дозволений напрямок: **`app` → `pages` → `features` → `shared`**.
 
 ```
-✅ entities/project може імпортувати з shared/api
-✅ features/create-project може імпортувати з entities/project
-✅ pages/projects може імпортувати з widgets/ та features/
-❌ entities НЕ може імпортувати з features або pages
-❌ shared НЕ може імпортувати з будь-якого іншого шару
-❌ Горизонтальні імпорти між slice-ами одного шару — за замовчуванням заборонені
+✅ pages/app/projects може імпортувати з features/* та shared/*
+✅ features/create-project може імпортувати з shared/* (api, query-keys, ui, …)
+✅ app/* може імпортувати з pages, features, shared (композиція маршрутів)
+❌ shared/* НЕ імпортує pages, features, app
+❌ pages/* НЕ імпортує інші pages/* (сусідні маршрути — окремі модулі)
+❌ features/* НЕ імпортує інші features/* (композиція на сторінці або спільне в shared)
 ```
 
-**Виняток `app/` та `shared/`:** сегменти всередині цих шарів можуть вільно імпортувати один з одного (вони не мають slice-ів).
+**Виняток:** сегменти всередині `app/` та `shared/` можуть імпортувати один одного (див. блок `shared/` вище).
 
-**Cross-entity references (`@x`):** за замовчуванням slice-и одного шару не можуть імпортувати один з одного. Але якщо entities семантично повʼязані (наприклад `translation-key` використовує тип з `project`), FSD дозволяє явний cross-import через публічний API (`index.ts`). Такі звʼязки мають бути мінімальними і задокументованими.
+**Спільні дані без крос-імпортів фіч:** типи та HTTP — `shared/api`; **одна форма query keys** — `shared/query-keys`.
 
 Правила enforced через `eslint-plugin-boundaries` (конфіг у `eslint.config.js`).
 
-Кожен slice експортує свій публічний API виключно через `index.ts`. Прямі імпорти з внутрішніх файлів slice — заборонені.
+Для `features/*` бажано **публічний API** через `index.ts`. Для `pages/*` допустимі прямі імпорти всередині мікромодуля сторінки; зовнішні споживачі підключаються через маршрут, а не через deep import іншої сторінки.
 
 ```ts
-// ✅ правильно
-import { useProjects } from '@/entities/project'
+// ✅ з feature — через публічний API
+import { CreateProjectModal } from '@/features/create-project'
 
-// ❌ заборонено — прямий імпорт з внутрішнього файлу slice
-import { useProjects } from '@/entities/project/api/use-projects'
+// ✅ ключі кешу — завжди з shared
+import { projectKeys } from '@/shared/query-keys/project-keys'
+
+// ❌ feature A не імпортує feature B
 ```
 
 ---
@@ -186,7 +197,7 @@ import { useProjects } from '@/entities/project/api/use-projects'
 
 | Артефакт | Конвенція | Приклад |
 |----------|-----------|---------|
-| Папки (FSD slices) | kebab-case | `translation-key/`, `create-project/` |
+| Папки (features / групи сторінок) | kebab-case | `create-project/`, `app/projects/` |
 | Всі файли | kebab-case | `translation-table.tsx`, `use-projects.ts`, `project-api.ts` |
 | React компоненти (назва) | PascalCase | `export function TranslationTable` |
 | Хуки (назва) | camelCase з префіксом `use` | `export function useProjects` |
@@ -232,14 +243,33 @@ location / {
 
 ## Error Handling
 
-**Глобальний `<ErrorBoundary>`** на рівні `app/` — ловить всі React-помилки рендеру.
+### React: Error Boundary (`app/`)
+
+**Глобальний `<ErrorBoundary>`** (або еквівалент з Mantine / `react-error-boundary`) розміщується **навколо дерева маршрутів / основного layout** у `app/` — щоб при необробленій помилці в дочірньому дереві показати fallback-екран (і за потреби лог / Sentry), а не білий екран.
+
+**Ловить:**
+- помилки під час **рендеру** React-компонентів;
+- помилки в **lifecycle** клас-компонентів (якщо є);
+- помилки в **конструкторах** дочірніх компонентів у межах дерева під boundary.
+
+**Не ловить** (треба окремий try/catch, `onError` у Query, обробники подій):
+- помилки в **обробниках подій** (`onClick`, `onSubmit` тощо);
+- **асинхронний** код поза рендером (`setTimeout`, `.then()` без пробросу, частина коду в `useEffect` після await);
+- помилки **самого** boundary;
+- помилки **SSR** (для SPA неактуально).
+
+Тобто boundary **не замінює** обробку помилок API — вона паралельна: рантайм UI ламається → boundary; мережа / 4xx / 5xx → Query / `handleGlobalError` / локальні стани.
+
+Детальніше про стани екрана `error` для даних — [UI Patterns](../standards/ui-patterns.md).
+
+### API та мережа
 
 **API-помилки** обробляються на двох рівнях:
-- Глобально — через `QueryCache` / `MutationCache` callbacks у `shared/api/query-client.ts` (toast-нотифікації)
-- Індивідуально — `onError` у мутаціях для специфічної UI-логіки (виділення полів форми)
-- `401` — ізольовано в axios interceptor (refresh + retry), не торкається TanStack Query
+- Глобально — через `QueryCache` / `MutationCache` callbacks у `shared/api/query-client.ts` (`handleGlobalError`, toast-и; див. [правила кодів](./state-management.md))
+- Індивідуально — `onError` у запитах/мутаціях для специфічної UI-логіки (поля форми, `suppressGlobalError`)
+- `401` — у `shared/api` (refresh + retry); TanStack Query бачить вже результат після повтору або фінальну помилку
 
-Конфігурація QueryClient, auth flow, BroadcastChannel logout — у [State Management](./state-management.md).
+Конфігурація QueryClient, auth flow, `BroadcastChannel` — у [State Management](./state-management.md).
 
 ---
 
@@ -266,7 +296,7 @@ location / {
 
 | Рівень | Інструмент | Що покривається |
 |--------|-----------|-----------------|
-| Unit | Vitest | entities hooks, validation helpers, auth store, query keys |
+| Unit | Vitest | хелпери, `shared/api`, auth/session, query key factory (pure), hooks |
 | Integration | Vitest + RTL + MSW | форми, компоненти з API-викликами |
 | E2E | Playwright | login flow, CRUD проєктів, workflow перекладача |
 
@@ -274,11 +304,11 @@ location / {
 
 MSW handlers: `shared/test/msw/handlers/` — перевикористовуються у unit, integration тестах та dev-режимі.
 
-**Coverage gate (CI):** `70%` — hard threshold, CI fails нижче. Ціль для entities/features: `80%`.
+**Coverage gate (CI):** `70%` — hard threshold, CI fails нижче. Ціль для `features/` та критичних `pages/`: `80%`.
 
 ---
 
 ## Детальна документація
 
-- [State Management](./state-management.md) — TanStack Query, Zustand, auth flow деталі
+- [State Management](./state-management.md) — TanStack Query, client state, auth flow, query keys
 - [API Contracts](./api-contracts.md) — endpoints, формати відповідей, коди помилок
