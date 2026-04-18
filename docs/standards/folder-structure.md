@@ -79,8 +79,9 @@ shared/
 ├── config/
 ├── i18n/
 ├── ui/            # глобальні примітиви, обгортки над UI-бібліотекою
+├── hooks/         # загальні React-хуки без продуктової семантики (див. overview)
 ├── lib/
-└── test/          # MSW handlers, тестові утиліти
+└── test/          # спільна тест-інфраструктура; MSW — під `test/msw/handlers/`
 ```
 
 Деталі: [Architecture Overview](../architecture/overview.md) (шари Page-First).
@@ -207,7 +208,7 @@ pages/app/projects/queries/use-projects.ts
 pages/app/projects/queries/use-projects.test.ts
 ```
 
-- **`shared/test/*`** — MSW handlers і спільна тест-інфраструктура.
+- **`shared/test/msw/handlers/`** — MSW handlers; інші тестові утиліти — у `shared/test/` за потреби.
 
 ---
 
@@ -244,4 +245,4 @@ pages/app/projects/queries/use-projects.test.ts
 - для нової **`feature`** є **`index.ts`**, якщо зовні її імпортують
 - ключі TanStack Query лише з **`shared/query-keys/`**
 - немає заборонених горизонтальних імпортів (`pages↔pages`, `features↔features`)
-- тести co-located або спільна інфра в **`shared/test/*`**
+- тести co-located або спільна інфра / MSW у **`shared/test/`** (handlers — у **`shared/test/msw/handlers/`**)

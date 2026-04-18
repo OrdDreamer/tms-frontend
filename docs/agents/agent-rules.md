@@ -71,7 +71,7 @@
 - `docs/architecture/*`
 - `docs/standards/*`
 - стратегія state management, auth flow, API integration rules
-- базові правила FSD/імпортів та інші інваріанти архітектури
+- базові правила **Page-First** (імпорти між шарами) та інші інваріанти архітектури — див. [`docs/architecture/overview.md`](../architecture/overview.md)
 
 ---
 

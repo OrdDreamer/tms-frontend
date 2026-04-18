@@ -9,7 +9,7 @@ Operational guide для консистентної реалізації UI у �
 ## Scope
 
 - Документ регулює **поведінку UI** і повторювані interaction patterns.
-- Документ не перевизначає FSD-структуру, auth flow або API contracts.
+- Документ не перевизначає структуру шарів **Page-First**, auth flow або API contracts.
 - Пов'язані документи:
   - `docs/architecture/frontend-architecture.md`
   - `docs/architecture/state-management.md`
@@ -130,7 +130,7 @@ onError: (error) => {
 - інші мутації: стандартний success + invalidate flow
 
 ### Rule: Після 401 UI не реалізує власний retry-flow
-**Why:** refresh/retry централізовано в axios interceptor.
+**Why:** refresh/retry централізовано в HTTP-обгортці `shared/api`.
 
 ---
 

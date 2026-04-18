@@ -1,17 +1,21 @@
 # API Contracts
 
-Цей документ описує **як фронтенд взаємодіє з API**: TypeScript-типи, конфігурацію axios та обробку помилок. Конвенції TanStack Query (key factories, staleTime, інвалідація) — у [State Management](./state-management.md).
+Цей документ описує **як фронтенд взаємодіє з API**: розміщення TypeScript-типів, обгортку над **`fetch` / `ofetch`** у `shared/api`, auth і обробку помилок. Конвенції TanStack Query (key factories, staleTime, інвалідація) — у [State Management](./state-management.md).
 
-> **Для агентів:** нові запити до API реалізуються виключно через entities-шар FSD. Не викликати axios напряму з features або widgets.
+> **Для агентів:** усі нові звернення до API — через **`shared/api`** (чисті функції запитів) і **TanStack Query** у `pages/*/queries` або `features/*` (або поруч із feature). **Не** викликати мережевий клієнт напряму з UI-компонентів. Архітектура шарів — **Page-First** (`app → pages → features → shared`); окремих шарів `entities/` / `widgets/` немає — див. [Overview](./overview.md) та [Folder Structure](../standards/folder-structure.md).
 
 ---
 
-## TypeScript-типи
+## Розміщення TypeScript-типів
 
-Типи живуть у відповідних entity-слайсах у `src/entities/<entity>/model/types.ts`.
+- **Спільні транспортні типи** (`PaginatedResponse`, `ApiError`, типи тіл відповідей, які споживає кілька доменів) — у **`shared/api/`** (наприклад `shared/api/types.ts` або доменні файли на кшталт `project-types.ts`).
+- **Доменні типи, прив’язані до одного екрана** — у мікромодулі сторінки: `pages/<area>/<page>/types/`.
+- **Доменні типи спільної feature** — у `features/<name>/types.ts` (або папка `types/`), якщо feature експортує стабільний публічний API.
+
+Приклади сутностей (канонічні поля узгоджені з [Data Models](./data-models.md) та [API Reference](./api-reference.md)):
 
 ```typescript
-// src/entities/user/model/types.ts
+// shared/api/user-types.ts (приклад розміщення)
 interface User {
   id: number;           // BigInt PK (не UUID!)
   email: string;
@@ -25,7 +29,7 @@ interface User {
 ```
 
 ```typescript
-// src/entities/project/model/types.ts
+// shared/api/project-types.ts (приклад)
 interface Project {
   id: string;           // UUID
   slug: string;         // використовується в URL замість id
@@ -45,7 +49,7 @@ interface ProjectLanguage {
 ```
 
 ```typescript
-// src/entities/translation-key/model/types.ts
+// shared/api/translation-key-types.ts (приклад)
 interface TranslationKey {
   id: string;
   key: string;                              // dot-notation: "auth.login.title"
@@ -65,7 +69,7 @@ interface TranslationValue {
 ```
 
 ```typescript
-// src/shared/api/types.ts
+// shared/api/types.ts
 interface PaginatedResponse<T> {
   count: number;
   next: string | null;
@@ -84,40 +88,35 @@ interface ApiError {
 
 ---
 
-## axios Instance
+## HTTP-клієнт у `shared/api`
 
-Єдиний інстанс знаходиться у `src/shared/api/instance.ts`.
+Єдина обгортка над **`ofetch`** або нативним **`fetch`** (базовий URL, заголовки, `credentials: 'include'` для httpOnly cookie на auth-ендпоінтах, `Authorization` з синхронного мосту токена). Рекомендована точка входу — модуль на кшталт `src/shared/api/client.ts` (точні імена файлів — у репозиторії).
 
-```typescript
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
-  withCredentials: true,   // обов'язково — для передачі httpOnly cookie
-});
-```
+### Доступ до access token поза React
 
-### Request interceptor — додає Authorization header
+Токен тримається **in-memory** у провайдері; HTTP-шар читає його через **`getAccessTokenSync()`** (див. [State Management — клієнтський стан / Auth](./state-management.md#клієнтський-стан-client-state)):
 
 ```typescript
-api.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().accessToken;
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+import { getAccessTokenSync } from "@/shared/api/auth-session";
+
+// У обгортці запиту перед відправкою:
+const token = getAccessTokenSync();
+const headers: HeadersInit = {
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+};
 ```
 
-### Response interceptor — 401 retry flow
+### Поведінка при `401`
 
-При 401 — одна спроба refresh через promise queue, потім повтор оригінального запиту. Якщо refresh невдалий — `clearAuth()` + BroadcastChannel logout + redirect.
+Одна спроба **refresh** через promise queue, потім **повтор** оригінального запиту. Якщо refresh невдалий — очищення сесії, за потреби **BroadcastChannel** для logout між вкладками та redirect на логін.
 
-Повна схема auth flow, promise queue та BroadcastChannel — у [State Management](./state-management.md#auth-flow).
+Повна схема — [State Management — Auth Flow](./state-management.md#auth-flow).
 
 ---
 
 ## TanStack Query — конвенції
 
-Query key factories, staleTime стратегія, правила інвалідації кешу, оптимістичні оновлення — у [State Management](./state-management.md#tanstack-query-server-state).
+Query key factories, staleTime, інвалідація, optimistic updates — у [State Management](./state-management.md#tanstack-query-server-state).
 
 ---
 
@@ -137,51 +136,57 @@ Query key factories, staleTime стратегія, правила інвалід
 }
 ```
 
-### Утиліта для читання помилки
+### Утиліти для читання помилки
+
+Працюють з **нормалізованою** помилкою, яку кидає/прокидає шар `shared/api` (об’єкт з полями на кшталт `status`, `data`), або з `unknown` після перевірки форми:
 
 ```typescript
 // src/shared/api/errors.ts
-function getApiError(error: unknown): string {
-  if (isAxiosError(error) && error.response?.data) {
-    return (error.response.data as ApiError).message ?? 'Unknown error';
-  }
-  return 'Network error';
+function isApiErrorBody(data: unknown): data is ApiError {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "message" in data &&
+    typeof (data as ApiError).message === "string"
+  );
 }
 
-function getFieldErrors(error: unknown): Record<string, string[]> {
-  if (isAxiosError(error) && error.response?.data) {
-    return (error.response.data as ApiError).extra?.fields ?? {};
+export const getApiError = (error: unknown): string => {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: unknown }).data;
+    if (isApiErrorBody(data)) return data.message;
   }
+  if (isApiErrorBody(error)) return error.message;
+  return "Network error";
+};
+
+export const getFieldErrors = (error: unknown): Record<string, string[]> => {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: unknown }).data;
+    if (isApiErrorBody(data) && data.extra?.fields) return data.extra.fields;
+  }
+  if (isApiErrorBody(error) && error.extra?.fields) return error.extra.fields;
   return {};
-}
+};
 ```
 
 ### HTTP коди та реакція фронтенду
 
 | Код | Ситуація | Реакція |
 |-----|---------|---------|
-| `400` | Помилка валідації | `getFieldErrors()` → показати біля поля |
-| `401` | Не автентифікований | Interceptor → refresh → retry або logout |
-| `403` | Немає прав | Показати повідомлення про відмову |
-| `404` | Ресурс не знайдений | Redirect на сторінку 404 або повідомлення |
-| `409` | Конфлікт (дублікат slug, конфлікт key) | Показати конкретну помилку |
-| `429` | Rate limit | Показати `Retry-After`, не робити автоматичний retry |
-| `5xx` | Серверна помилка | Загальне повідомлення, логувати в консоль |
+| `400` | Помилка валідації | `getFieldErrors()` → поля форми; глобальний toast приглушити (`meta.suppressGlobalError` тощо — див. [State Management](./state-management.md)) |
+| `401` | Не автентифікований | Обробка в `shared/api` → refresh → retry або logout |
+| `403` | Немає прав | Повідомлення / redirect за політикою продукту |
+| `404` | Ресурс не знайдений | На екрані очікувано — empty / 404 UI; інакше fallback за політикою |
+| `409` | Конфлікт | Специфічний UI або локальний `onError` |
+| `429` | Rate limit | Показати `Retry-After`, без зайвого автоматичного retry |
+| `5xx` | Серверна помилка | Глобальний toast через `handleGlobalError`, якщо не приглушено локально |
 
-### Нотифікації
+### Нотифікації та глобальний шар
 
-Використовувати `notifications` з Mantine. **Не показувати toast при кожній помилці автоматично** — мутації показують помилку самостійно через `onError`.
+За замовчуванням помилки запитів/мутацій потрапляють у **`handleGlobalError`** на `QueryCache` / `MutationCache` ([State Management](./state-management.md)). Локально: **`onError`** у `useQuery` / `useMutation`, **`meta.suppressGlobalError: true`** для тихих або повністю оброблених кейсів, **`HandledApiError`** (або еквівалент), щоб глобальний шар не дублював toast.
 
-```typescript
-import { notifications } from '@mantine/notifications';
-
-// В onError мутації
-notifications.show({
-  color: 'red',
-  title: 'Помилка',
-  message: getApiError(error),
-});
-```
+Для кастомного повідомлення в конкретній мутації можна використати `@mantine/notifications` у `onError` — узгоджуючи з правилом **без дублювання** з [State Management](./state-management.md).
 
 ---
 

@@ -191,13 +191,16 @@ useUpdateTranslation()
 useBulkDeleteKeys()
 ```
 
-### Rule: Клієнтський store (якщо використовується) — `use<Domain>Store` або контекст `use<Domain>`
-**Why:** явне позначення джерела client state. Деталі шару стану — `docs/architecture/state-management.md`.
+### Rule: Клієнтський стан і сесія — `use<Domain>()` з React Context (типово)
+**Why:** канон проєкту — in-memory сесія та провайдери; синхронний доступ для HTTP — `getAccessTokenSync` / `setAccessTokenSync` у `shared/api` (див. `docs/architecture/state-management.md`). **Zustand** не є дефолтним; якщо з’явиться store на кшталт `use<Domain>Store` — лише після явного архітектурного рішення.
 
 **Example**
 ```ts
-useAuthStore // лише якщо обрано Zustand після явного рішення
-// або: useAuth() з React Context
+// типово: хук контексту авторизації
+useAuth();
+
+// HTTP-шар (не React-хук):
+getAccessTokenSync();
 ```
 
 ### Rule: Селектори / accessors називати за значенням
@@ -205,7 +208,7 @@ useAuthStore // лише якщо обрано Zustand після явного �
 
 **Example**
 ```ts
-const accessToken = useAuth((s) => s.accessToken);
+const { user, isAuthenticated } = useAuth();
 ```
 
 ---

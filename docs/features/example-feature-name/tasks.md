@@ -35,12 +35,12 @@
   - Input:
     - spec: `/docs/features/feature-name/spec.md`
   - Output:
-    - mutation hook in `features/*/api`
+    - mutation hook у `features/*/queries` (або поруч із feature, напр. `use-*.ts`)
     - on success invalidates `translationKeyKeys.lists(projectSlug)`
     - shows success feedback
   - Constraints:
     - no broad cache invalidation
-    - no direct axios calls from UI components
+    - no direct HTTP client calls from UI components (лише через `shared/api` + Query)
 
 - [ ] Task 4: Handle edge states and error scenarios
   - Input:

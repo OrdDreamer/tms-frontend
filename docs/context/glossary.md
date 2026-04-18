@@ -74,8 +74,11 @@ JWT-токен для авторизації запитів. TTL — 60 хв. П
 **LimitOffset Pagination**
 Тип пагінації: параметри `limit` (розмір сторінки, default 20, max 100) та `offset` (зміщення). `count` — загальна кількість записів.
 
-**FSD (Feature-Sliced Design)**
-Архітектурна методологія організації коду. Шари: `app → pages → widgets → features → entities → shared`. Верхні шари імпортують з нижніх, не навпаки.
+**Page-First**
+Архітектурна методологія цього репозиторію. Шари: `app → pages → features → shared`. Залежності лише зверху вниз; окремих top-level шарів `widgets/` та `entities/` немає. Детально — [`docs/architecture/overview.md`](../architecture/overview.md).
 
-**Slice**
-Один модуль всередині шару FSD. Наприклад, `entities/project` або `features/create-project`. Експортує публічний API через `index.ts`.
+**FSD (Feature-Sliced Design)**
+Зовнішня методологія слайсів і шарів; **у цьому проєкті не є цільовою моделлю** коду (не плутати з Page-First). Корисна як довідковий термін при читанні сторонніх матеріалів.
+
+**Slice / мікромодуль**
+У Page-First: **мікромодуль сторінки** (`pages/<area>/<page>/` з `queries/`, `components/`, …) або **`features/<name>/`** з публічним API через `index.ts`, де це доречно.

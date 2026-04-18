@@ -152,8 +152,9 @@ shared/
 ├── config/      # env.ts — типізовані змінні середовища
 ├── i18n/        # config.ts + locales/en/, locales/uk/
 ├── ui/          # UI-примітиви без бізнес-логіки (error-boundary, page-loader)
+├── hooks/       # загальні абстрактні хуки без прив'язки до конкретної бізнес-фічі
 ├── lib/         # утиліти загального призначення
-└── test/msw/    # MSW handlers — unit / integration / dev
+└── test/msw/    # MSW handlers (`handlers/`) — unit / integration / dev
 ```
 
 > У межах `shared/` сегменти можуть імпортувати один одного (наприклад `shared/api` + `shared/auth` для заголовка `Authorization` та refresh). **`shared/` не залежить від `pages/`, `features/`, `app/`.**
@@ -199,9 +200,9 @@ import { projectKeys } from '@/shared/query-keys/project-keys'
 |----------|-----------|---------|
 | Папки (features / групи сторінок) | kebab-case | `create-project/`, `app/projects/` |
 | Всі файли | kebab-case | `translation-table.tsx`, `use-projects.ts`, `project-api.ts` |
-| React компоненти (назва) | PascalCase | `export function TranslationTable` |
-| Хуки (назва) | camelCase з префіксом `use` | `export function useProjects` |
-| Утиліти / helpers (назва) | camelCase | `export function formatDate` |
+| React компоненти (назва) | PascalCase експорт, стрілочна реалізація | `export const TranslationTable = () => { … }` |
+| Хуки (назва) | camelCase з префіксом `use`, стрілочна реалізація | `export const useProjects = () => { … }` |
+| Утиліти / helpers (назва) | camelCase, стрілочна реалізація | `export const formatDate = (…) => …` |
 | TypeScript типи/інтерфейси | PascalCase | `type Project`, `interface ApiError` |
 | Query keys об'єкти | camelCase | `projectKeys.all`, `projectKeys.detail(id)` |
 | API функції | camelCase | `fetchProjects()`, `createProject()` |

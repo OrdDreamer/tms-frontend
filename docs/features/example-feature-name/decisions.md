@@ -38,7 +38,7 @@
 
 - Status: accepted
 - Why:
-  - 401/retry flow уже централізовано в axios interceptor
+  - 401/retry flow уже централізовано в HTTP-обгортці `shared/api`
 - Impact:
   - менше дублювання логіки
   - одна поведінка auth-помилок у всьому застосунку

@@ -65,18 +65,21 @@ const DEFAULT_PAGE_SIZE = 20;
 const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 ```
 
-### Rule: Імпорти тільки через публічний API slice
+### Rule: Імпорти через публічний API модуля (feature / shared)
 
-**Why:** ізоляція внутрішньої структури slice, стабільність імпортів.
+**Why:** ізоляція внутрішньої структури модуля, стабільність імпортів.
 
 **Example**
 
 ```ts
-// ✅
-import { useProjects } from "@/entities/project";
+// ✅ feature з публічного barrel
+import { CreateProjectModal } from "@/features/create-project";
 
-// ❌
-import { useProjects } from "@/entities/project/api/use-projects";
+// ✅ query-хук сторінки — з мікромодуля сторінки (підключення з роутера, не deep ззовні)
+import { useProjects } from "@/pages/app/projects/queries/use-projects";
+
+// ❌ deep-import у внутрішність чужої сторінки
+import { something } from "@/pages/app/projects/internal-helper";
 ```
 
 ---
@@ -92,7 +95,7 @@ import { useProjects } from "@/entities/project/api/use-projects";
 **Example**
 
 ```ts
-// ✅ компонент споживає хук, а не axios напряму
+// ✅ компонент споживає хук Query, а не мережевий клієнт напряму
 const { data, isLoading, isError } = useProjects();
 ```
 
@@ -131,14 +134,11 @@ return <ProjectsTable data={data} />;
 
 **Why:** єдине джерело правди, керований кеш та інвалідація.
 
-### Rule: Zustand лише для мінімального client state
+### Rule: Клієнтський стан і сесія — Context і локальний стан
 
-**Why:** уникнення дублювання даних і розсинхронізації.
+**Why:** узгоджено з каноном: access token **in-memory** у провайдері + синхронний «міст» для `shared/api` (див. [State Management](../architecture/state-management.md#клієнтський-стан-client-state)).
 
-**Allowed у store**
-
-- access token
-- дрібний UI state, який не є server state і не підходить для URL
+**Zustand** у проєкті **не** є типовим вибором; якщо колись з’явиться — лише після явного архітектурного рішення (як у [Overview](../architecture/overview.md)).
 
 ### Rule: Form state локально в компоненті
 
@@ -148,37 +148,23 @@ return <ProjectsTable data={data} />;
 
 **Why:** deep-linking, shareable URL, коректний back/forward flow.
 
-### Rule: Підписка на Zustand тільки через selector
-
-**Why:** мінімум зайвих re-render.
-
-**Example**
-
-```ts
-// ✅
-const token = useAuthStore((s) => s.accessToken);
-
-// ❌
-const auth = useAuthStore();
-```
-
-Деталі: `docs/architecture/state-management.md`.
+Деталі: [State Management](../architecture/state-management.md).
 
 ---
 
 ## 4) API Interaction Rules
 
-### Rule: axios викликається тільки у `entities/*/api` або `shared/api`
+### Rule: мережеві виклики лише в `shared/api`
 
-**Why:** єдина точка контролю auth, retries, errors.
+**Why:** єдина точка контролю auth, retries, errors; обгортка над `fetch` / `ofetch` (див. [API Contracts](../architecture/api-contracts.md)).
 
-### Rule: features працюють через entity API + mutation hooks
+### Rule: `pages/*` і `features/*` споживають API через Query-хуки та функції з `shared/api`
 
-**Why:** features описують user action, а не транспорт.
+**Why:** UI і сценарії не дублюють транспорт; `queryFn` / `mutationFn` викликають типізовані функції з `shared/api`.
 
 ### Rule: 401 flow не дублювати в компонентах
 
-**Why:** refresh/retry вже централізовано у interceptor.
+**Why:** refresh/retry уже централізовано в HTTP-обгортці `shared/api`.
 
 ### Rule: Помилки форми мапити через `getFieldErrors`
 
@@ -230,9 +216,9 @@ queryClient.invalidateQueries({ queryKey: ["projects"] });
 
 **Why:** складніше підтримувати, перевикористовувати та уніфікувати.
 
-### Rule: Повторювані UI-рішення виносити у `shared/ui` або `widgets`
+### Rule: Повторювані UI-рішення виносити у `shared/ui` або в `features/*` / локальні `pages/.../ui`
 
-**Why:** менше дублювання і однакові патерни поведінки.
+**Why:** менше дублювання; окремого шару `widgets/` у проєкті немає (див. [Folder Structure](./folder-structure.md)).
 
 ---
 
@@ -242,7 +228,7 @@ queryClient.invalidateQueries({ queryKey: ["projects"] });
 
 **Why:** захист основного user flow від регресій.
 
-### Rule: Entities покриваються unit/integration тестами на API-hooks та маппери
+### Rule: Критичні `shared/api`, query-хуки та маппери покривати unit/integration тестами
 
 **Why:** саме тут найбільший ризик контрактних помилок.
 
@@ -256,9 +242,9 @@ queryClient.invalidateQueries({ queryKey: ["projects"] });
 
 ## 8) Anti-Patterns Checklist
 
-- дублювати server data у Zustand
-- прямі імпорти з внутрішніх файлів slice замість `index.ts`
-- axios-виклики з `features/ui/components`
+- дублювати server data у глобальному клієнтському store замість TanStack Query
+- прямі імпорти з внутрішніх файлів модуля замість публічного API (`index.ts` feature тощо)
+- «сирий» HTTP / обхід `shared/api` з компонентів або з `pages/.../ui`
 - широка інвалідація кешу "по префіксу"
 - локальна реалізація refresh token flow в окремих хуках
 - ігнорування `loading/empty/error` станів
